@@ -17,8 +17,15 @@ const gameSchema = joi.object({
     name: joi.string().required(),
     image: joi.string().regex(/(https:\/\/)([^\s(["<,>/]*)(\/)[^\s[",><]*(.png|.jpg)(\?[^\s[",><]*)?/),
     stockTotal: joi.number().integer().min(1),
-    categoryId: joi.number().integer().min(1),
-    pricePerDay: joi.number().integer()
+    categoryId: joi.number().integer(),
+    pricePerDay: joi.number().integer().min(1)
+})
+
+const customerSchema = joi.object({
+    name: joi.string().required(),
+    phone: joi.string().min(10).max(11).required(),
+    cpf: joi.string().regex(/[0-9]{11}/).length(11).required(),
+    birthday: joi.date().required()
 })
 
 app.get("/categories", async (req,res)=>{
@@ -38,7 +45,6 @@ app.post("/categories", async (req, res)=>{
         return res.sendStatus(400);
     }
     const categorias = await db.query(`SELECT * FROM categories WHERE name = ($1)`,[name])
-    console.log(categorias);
     if (categorias.rows[0]){
         return res.status(409).send("Nome da categoria já existe");
     }
@@ -52,25 +58,31 @@ app.post("/categories", async (req, res)=>{
 });
 
 app.get("/games", async (req, res)=>{
+    const {name} = req.query;
+    if (name){
+        try{
+            const games = await db.query(`
+            SELECT games.*, categories."name" as categoryName 
+            FROM games 
+            JOIN categories ON games."categoryId" = categories."id"
+            WHERE UPPER(games."name") LIKE UPPER($1)
+            `,[name + '%']);
+            return res.status(200).send(games.rows);
+        } catch (e) {
+            console.log("Erro ao fazer a operação para receber os jogos", e);
+            return res.sendStatus(500);
+        }
+    }
+
     try{
-        const games = await db.query("SELECT * FROM games");
+        const games = await db.query(`
+        SELECT games.*, categories."name" as categoryName 
+        FROM games 
+        JOIN categories ON games."categoryId" = categories."id";
+        `);
         res.status(200).send(games.rows);
     } catch (e) {
         console.log("Erro ao fazer a operação para receber os jogos", e);
-    }
-});
-
-app.get("/games/:name", async (req, res)=>{
-    const {name} = req.params;
-    try{
-        const games = await db.query(`
-        SELECT * FROM games 
-        WHERE name LIKE $1
-        `,[name + '%']);
-        return res.status(200).send(games.rows);
-    } catch (e) {
-        console.log("Erro ao fazer a operação para receber os jogos", e);
-        return res.sendStatus(500);
     }
 });
 
@@ -108,6 +120,96 @@ app.post("/games", async(req, res)=>{
         console.log(e);
         return res.status(500).send('Erro ao cadastrar o jogo no banco de dados');
     }
+});
+
+app.get("/customers", async(req, res)=>{
+    const {cpf} = req.query;
+    if(cpf){
+        try{
+            const customers = await db.query(`
+            SELECT * FROM customers     
+            WHERE "cpf" LIKE $1;
+            `, [cpf + '%']);
+            return  res.send(customers.rows);
+        } catch (e) {
+            return res.status(500).send('Erro ao se comunicar com o banco de dados para pegar os clientes ', e);
+        }
+    }
+    try{
+        const customers = await db.query(`
+        SELECT * FROM customers;
+        `);
+        return  res.send(customers.rows);
+    } catch (e) {
+        return res.status(500).send('Erro ao se comunicar com o banco de dados para pegar os clientes ', e);
+    }
+
+});
+
+app.get("/customers/:id", async(req, res)=>{
+    const {id} = req.params;
+    if (id) {
+        try{
+            const user = await db.query(`
+            SELECT * FROM customers WHERE id = $1;
+            `, [id]);
+            if (user.rows[0].length !== 0){
+                return res.send(user.rows[0]);
+            }
+            return res.sendStatus(404);
+        } catch (e){
+            return res.status(500).send('Erro ao tentar pegar o usuário no banco de dados.', e)
+        }
+    } else {
+        return res.status(404).status('ID nulo')
+    }
+});
+
+app.post("/customers", async(req, res)=>{
+    const customer = req.body;
+    const {error} = customerSchema.validate(req.body);
+
+    if (error){
+        console.log(error.details);
+        return res.sendStatus(400);
+    }
+
+    try{
+        await db.query(`
+        INSERT INTO customers ("name", "phone", "cpf", "birthday") 
+        VALUES ($1, $2, $3, $4);
+        `, [customer.name, customer.phone, customer.cpf, customer.birthday]);
+        return res.sendStatus(201);
+    } catch (e){
+        return res.send('Não foi possível cadastrar cliente no banco de dados', e)
+    }
+});
+
+app.put("/customers/:id", async (req, res)=>{
+    const {id} = req.params;
+    const customer = req.body;
+
+    if (!id || !customer) {
+        return res.sendStatus(404);
+    }
+
+    const {error} = customerSchema.validate(req.body);
+    if (error){
+        return res.status(400).send(error.details);
+    }
+    try {
+        await db.query(`
+        UPDATE customers SET 
+        "name" = $1, "phone" = $2, "cpf" = $3, "birthday" = $4
+        WHERE id = $5;
+        `, [customer.name, customer.phone, customer.cpf, customer.birthday, id])
+
+        return res.sendStatus(200);
+    } catch (e) {
+        console.log(e);
+        return res.send('Erro ao comunicar com o banco para atualizar registro de usuário')
+    }
+
 });
 
 app.listen(process.env.PORT);
