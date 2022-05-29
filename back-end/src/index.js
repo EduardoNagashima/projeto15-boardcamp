@@ -213,7 +213,7 @@ app.put("/customers/:id", async (req, res)=>{
         UPDATE customers SET 
         "name" = $1, "phone" = $2, "cpf" = $3, "birthday" = $4
         WHERE id = $5;
-        `, [customer.name, customer.phone, customer.cpf, customer.birthday, id])
+        `, [customer.name, customer.phone, customer.cpf, customer.birthday, id]);
 
         return res.sendStatus(200);
     } catch (e) {
@@ -272,11 +272,25 @@ app.post("/rentals", async (req, res)=>{
 
 app.post("/rentals/:id/return", async (req, res)=>{
     const {id} = req.params;
-    
-    try{
-        await db.query(`
+    const today = dayjs().format('YYYY-MM-DD');
 
-        `,[]);
+    try{
+        const rental = await db.query(`
+        SELECT * FROM rentals
+        WHERE id = $1;
+        `,[id]);
+
+        if (rental.rows.length === 0){
+            return res.sendStatus(404);
+        }
+
+        const delay = 0;
+
+        await db.query(`
+        UPDATE rentals SET "returnDate" = $1, "delayFee" = $2 
+        `,[today, delay]);
+
+        return res.sendStatus(200);
     } catch (e){
         console.log(e);
         return res.sendStatus(500);
