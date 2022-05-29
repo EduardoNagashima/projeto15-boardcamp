@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import express from "express";
 import cors from "cors";
+import dayjs from "dayjs";
 import db from "../database.js";
 import joi from "joi";
 dotenv.config();
@@ -62,7 +63,7 @@ app.get("/games", async (req, res)=>{
     if (name){
         try{
             const games = await db.query(`
-            SELECT games.*, categories."name" as categoryName 
+            SELECT games.*, categories."name" as "categoryName" 
             FROM games 
             JOIN categories ON games."categoryId" = categories."id"
             WHERE UPPER(games."name") LIKE UPPER($1)
@@ -76,7 +77,7 @@ app.get("/games", async (req, res)=>{
 
     try{
         const games = await db.query(`
-        SELECT games.*, categories."name" as categoryName 
+        SELECT games.*, categories."name" as "categoryName" 
         FROM games 
         JOIN categories ON games."categoryId" = categories."id";
         `);
@@ -175,13 +176,23 @@ app.post("/customers", async(req, res)=>{
     }
 
     try{
+        const customerExist = await db.query(`
+            SELECT * FROM customers 
+            WHERE "cpf" = $1;
+        `,[customer.cpf]);
+
+        if (customerExist.rows.length !== 0){
+            return res.sendStatus(409);
+        }
+
         await db.query(`
         INSERT INTO customers ("name", "phone", "cpf", "birthday") 
         VALUES ($1, $2, $3, $4);
         `, [customer.name, customer.phone, customer.cpf, customer.birthday]);
         return res.sendStatus(201);
     } catch (e){
-        return res.send('Não foi possível cadastrar cliente no banco de dados', e)
+        console.log(e);
+        return res.status(500).send('Não foi possível cadastrar cliente no banco de dados')
     }
 });
 
@@ -210,6 +221,94 @@ app.put("/customers/:id", async (req, res)=>{
         return res.send('Erro ao comunicar com o banco para atualizar registro de usuário')
     }
 
+});
+
+app.get("/rentals", async (req, res)=>{
+    try{
+        const rentals = await db.query(`
+        SELECT rentals.*, customers.* as "Customers", games.* as "GAMES"  
+        FROM rentals
+        JOIN customers ON rentals."customerId" = customers."id"
+         JOIN games ON rentals."gameId" = games."id"
+        `)
+
+        return res.send(rentals.rows);
+    } catch (e) {
+        return res.status(500).send('Erro ao se comunicar com o banco de dados para pegar os alugueis ', e);
+    }
+});
+
+app.post("/rentals", async (req, res)=>{
+    const rental = req.body;
+    const today = dayjs().format('YYYY-MM-DD');
+    console.log(today);
+
+    try{
+        const game = await db.query(`
+        SELECT * FROM games
+        WHERE id = $1;
+        `,[rental.gameId]);
+
+        const customers = await db.query(`
+        SELECT * FROM customers
+        WHERE id = $1;
+        `,[rental.customerId]);
+
+        if (game.rows.length === 0 || rental.daysRented === 0 || customers.rows.length === 0){
+            return res.sendStatus(400);
+        }
+
+        const price = game.rows[0].pricePerDay;
+
+        await db.query(`
+        INSERT INTO rentals ("customerId", "gameId", "rentDate", "daysRented", "originalPrice") VALUES ($1, $2, $3, $4, $5);
+        `,[rental.customerId, rental.gameId, today, rental.daysRented, (parseInt(price) * parseInt(rental.daysRented))])
+        return res.sendStatus(201);
+    } catch (e){
+        console.log(e);
+        return res.status(500).send(e);
+    }
+});
+
+app.post("/rentals/:id/return", async (req, res)=>{
+    const {id} = req.params;
+    
+    try{
+        await db.query(`
+
+        `,[]);
+    } catch (e){
+        console.log(e);
+        return res.sendStatus(500);
+    }
+});
+
+app.delete("/rentals/:id", async (req, res)=>{
+    const {id} = req.params;
+    try{
+
+        const rental = await db.query(`
+        SELECT * FROM rentals
+        WHERE "id" = $1
+        `,[id]);
+
+        if (!(rental.rows.length !== 0)){
+            return res.sendStatus(404);
+        }
+
+        if (!rental.rows[0].returnDate){
+            return res.sendStatus(400);
+        }
+
+        await db.query(`
+        DELETE FROM rentals 
+        WHERE "id" = $1
+        `, [id]);
+        return res.sendStatus(200);
+    } catch (e) {
+        console.log(e);
+        res.sendStatus(500);
+    }
 });
 
 app.listen(process.env.PORT);
