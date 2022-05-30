@@ -224,15 +224,43 @@ app.put("/customers/:id", async (req, res)=>{
 });
 
 app.get("/rentals", async (req, res)=>{
+    const arrObj = [];
+
     try{
         const rentals = await db.query(`
-        SELECT rentals.*, customers.* as "Customers", games.* as "GAMES"  
+        SELECT rentals.*, customers.name as "customersName" , games.*  
         FROM rentals
         JOIN customers ON rentals."customerId" = customers."id"
          JOIN games ON rentals."gameId" = games."id"
         `)
 
-        return res.send(rentals.rows);
+        rentals.rows.forEach(el=>{
+            const obj = {
+                id: el.id,
+                customerId: el.customerId,
+                gameId: el.gameId,
+                rentDate: el.rentDate,
+                daysRented: el.daysRented,
+                returnDate: el.returnDate, // troca pra uma data quando já devolvido
+                originalPrice: el.originalPrice,
+                delayFee: el.delayFee,
+                customer: {
+                 id: el.customerId,
+                 name: el.customersName
+                },
+                game: {
+                  id: el.gameId,
+                  name: el.name,
+                  categoryId: el.categoryId,
+                  categoryName: el.cate
+                }
+              }
+              arrObj.push(obj);
+        })
+        
+
+
+        return res.send(arrObj);
     } catch (e) {
         return res.status(500).send('Erro ao se comunicar com o banco de dados para pegar os alugueis ', e);
     }
@@ -241,7 +269,6 @@ app.get("/rentals", async (req, res)=>{
 app.post("/rentals", async (req, res)=>{
     const rental = req.body;
     const today = dayjs().format('YYYY-MM-DD');
-    console.log(today);
 
     try{
         const game = await db.query(`
@@ -272,23 +299,29 @@ app.post("/rentals", async (req, res)=>{
 
 app.post("/rentals/:id/return", async (req, res)=>{
     const {id} = req.params;
-    const today = dayjs().format('YYYY-MM-DD');
+    const today = new Date(dayjs().format('YYYY-MM-DD'));
 
     try{
+        let delay = 0;
         const rental = await db.query(`
         SELECT * FROM rentals
         WHERE id = $1;
         `,[id]);
-
+        
         if (rental.rows.length === 0){
             return res.sendStatus(404);
         }
-
-        const delay = 0;
+        
+        let daysRented = new Date(rental.rows[0].rentDate);
+        daysRented.setDate(daysRented.getDate() + rental.rows[0].daysRented);
+        const lateDays = Math.round((today - new Date(daysRented)) / 86400000);
+        if (lateDays){
+            delay = lateDays * rental.rows[0].originalPrice;
+        }
 
         await db.query(`
-        UPDATE rentals SET "returnDate" = $1, "delayFee" = $2 
-        `,[today, delay]);
+        UPDATE rentals SET "returnDate" = $1, "delayFee" = $2 WHERE "id" = $3
+        `,[today, delay, id]);
 
         return res.sendStatus(200);
     } catch (e){
@@ -300,16 +333,16 @@ app.post("/rentals/:id/return", async (req, res)=>{
 app.delete("/rentals/:id", async (req, res)=>{
     const {id} = req.params;
     try{
-
         const rental = await db.query(`
         SELECT * FROM rentals
         WHERE "id" = $1
         `,[id]);
+        console.log(rental.rows[0])
+        console.log(rental.rows.length)
 
-        if (!(rental.rows.length !== 0)){
+        if (rental.rows.length === 0){
             return res.sendStatus(404);
         }
-
         if (!rental.rows[0].returnDate){
             return res.sendStatus(400);
         }
